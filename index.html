@@ -1,0 +1,542 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="theme-color" content="#f8fafc">
+    <title>AroviaHealth</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/page-flip@2.0.7/dist/js/page-flip.browser.min.js"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: 'Inter', sans-serif;
+            background: #f1f5f9;
+            color: #0f172a;
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+
+        header {
+            display: flex; align-items: center; justify-content: space-between;
+            padding: 10px 18px;
+            background: rgba(255,255,255,.9);
+            border-bottom: 1px solid #e2e8f0;
+            flex-shrink: 0;
+        }
+        header h1 { font-size: 18px; font-weight: 700; letter-spacing: .5px; color: #0f172a; }
+        header h1 span { color: #2563eb; }
+
+        #toolbar {
+            display: flex; align-items: center; justify-content: center;
+            gap: 8px; padding: 8px 12px; flex-wrap: wrap;
+            background: rgba(255,255,255,.8);
+            border-bottom: 1px solid #e2e8f0;
+            flex-shrink: 0;
+        }
+        .tbtn {
+            background: #f1f5f9; color: #0f172a;
+            border: 1px solid #cbd5e1; border-radius: 8px;
+            padding: 7px 12px; font-size: 14px; cursor: pointer;
+            display: flex; align-items: center; gap: 6px;
+            transition: background .15s; user-select: none;
+        }
+        .tbtn:hover { background: #e2e8f0; }
+        .tbtn svg { width: 16px; height: 16px; }
+        #pageBox {
+            background: #f1f5f9; border: 1px solid #cbd5e1; border-radius: 8px;
+            padding: 7px 14px; font-size: 14px; display: flex; gap: 6px; align-items: center;
+        }
+        #pageBox b { color: #2563eb; font-family: monospace; }
+        #pageBox span.dim { color: #94a3b8; }
+        .sep { width: 1px; height: 22px; background: #cbd5e1; }
+
+        #stage {
+            flex: 1; position: relative;
+            overflow: auto; padding: 20px;
+            background: #e2e8f0;
+            touch-action: pan-x pan-y;
+            -webkit-overflow-scrolling: touch;
+        }
+        /* margin:auto trick: centers the book when it fits, but when zoomed
+           beyond the stage it anchors top-left so it stays fully scrollable */
+        #bookHolder {
+            min-width: 100%; min-height: 100%;
+            display: flex; align-items: center; justify-content: center;
+        }
+        /* wrapper sized to the SCALED book, so the stage scrolls correctly */
+        #scaleWrap { flex: 0 0 auto; margin: auto; }
+        /* the flipbook itself is never resized — only CSS-scaled. PageFlip's
+           internal DOM stays put, so 3D flips keep working at any zoom */
+        #flipbook { transform-origin: 0 0; opacity: 0; transition: opacity .5s ease; }
+        #flipbook.active { opacity: 1; }
+        .page { background: #fff; box-shadow: inset 0 0 30px rgba(0,0,0,.06); }
+        .page img { width: 100%; height: 100%; object-fit: cover; background: #fff; display: block; user-select: none; -webkit-user-drag: none; }
+        .stf__block { perspective: 2500px; }
+
+        .navbtn {
+            position: absolute; top: 50%; transform: translateY(-50%);
+            width: 52px; height: 52px; border-radius: 50%;
+            background: rgba(255,255,255,.9); color: #0f172a;
+            border: 1px solid #cbd5e1; font-size: 24px; cursor: pointer; z-index: 20;
+            display: flex; align-items: center; justify-content: center;
+            transition: background .15s;
+            box-shadow: 0 2px 8px rgba(15,23,42,.12);
+        }
+        .navbtn:hover { background: #f1f5f9; }
+        #prevBtn { left: 14px; }
+        #nextBtn { right: 14px; }
+
+        #overlay {
+            position: absolute; inset: 0; display: flex; flex-direction: column;
+            align-items: center; justify-content: center; gap: 14px;
+            color: #64748b; z-index: 10; background: #e2e8f0;
+        }
+        #overlay .loadbar {
+            width: 240px; height: 8px; border-radius: 4px;
+            background: #cbd5e1; overflow: hidden;
+        }
+        #overlay .loadbar-fill {
+            height: 100%; width: 0%; border-radius: 4px;
+            background: linear-gradient(90deg, #2563eb, #3b82f6);
+            transition: width .18s ease;
+        }
+        #overlay .err { color: #dc2626; max-width: 420px; text-align: center; line-height: 1.5; }
+
+        #thumbWrap {
+            flex-shrink: 0; background: #fff;
+            border-top: 1px solid #e2e8f0; padding: 8px 12px;
+        }
+        #thumbs {
+            display: flex; gap: 8px; overflow-x: auto; padding-bottom: 4px;
+            scrollbar-width: thin; scrollbar-color: #cbd5e1 #f1f5f9;
+        }
+        #thumbs::-webkit-scrollbar { height: 6px; }
+        #thumbs::-webkit-scrollbar-track { background: #f1f5f9; }
+        #thumbs::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 3px; }
+        .thumb {
+            flex: 0 0 auto; width: 66px; height: 90px;
+            border-radius: 6px; overflow: hidden; cursor: pointer;
+            border: 2px solid transparent; background: #f1f5f9;
+            opacity: .55; transition: all .18s; position: relative;
+        }
+        .thumb:hover { opacity: .85; transform: translateY(-2px); }
+        .thumb.active { opacity: 1; border-color: #2563eb; }
+        .thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+        .thumb .num {
+            position: absolute; bottom: 2px; left: 2px;
+            font-size: 10px; background: rgba(15,23,42,.75); color: #fff;
+            padding: 0 4px; border-radius: 3px; font-weight: 600;
+        }
+    </style>
+<base target="_blank">
+</head>
+<body>
+
+<header>
+    <h1><span>&#10022;</span> AroviaHealth <span>&#10022;</span></h1>
+    <button class="tbtn" id="dlBtn" title="Download PDF">
+        <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>
+        Download
+    </button>
+</header>
+
+<div id="toolbar">
+    <button class="tbtn" id="prevBtnT" title="Previous page">
+        <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"/></svg>
+    </button>
+    <div id="pageBox">Page <b id="curPage">1</b> <span class="dim">/ <span id="totPages">–</span></span></div>
+    <button class="tbtn" id="nextBtnT" title="Next page">
+        <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>
+    </button>
+    <div class="sep"></div>
+    <button class="tbtn" id="zoomOut" title="Zoom out">
+        <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-width="2" d="M20 12H4"/></svg>
+    </button>
+    <div id="pageBox"><b id="zoomLabel">100%</b></div>
+    <button class="tbtn" id="zoomIn" title="Zoom in">
+        <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
+    </button>
+</div>
+
+<div id="stage">
+    <div id="overlay">
+        <div class="loadbar"><div class="loadbar-fill" id="loadFill"></div></div>
+        <div id="statusText">Loading mybookru.pdf&hellip; 0%</div>
+    </div>
+    <div id="bookHolder"><div id="scaleWrap"><div id="flipbook"></div></div></div>
+    <button class="navbtn" id="prevBtn" title="Previous page">&#10094;</button>
+    <button class="navbtn" id="nextBtn" title="Next page">&#10095;</button>
+</div>
+
+<div id="thumbWrap"><div id="thumbs"></div></div>
+
+<script>
+pdfjsLib.GlobalWorkerOptions.workerSrc =
+    'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+
+const PDF_URL = 'mybookru.pdf?v=' + Date.now();
+
+let pdfDoc = null, flipBook = null;
+let totalPages = 0, baseW = 500, baseH = 700, currentZoom = 1.0, hasFiller = false;
+
+/* showCover needs an EVEN total page count to make both the front cover
+   AND the back cover stand alone — with an odd count (like 19) the last
+   content page ends up sharing a spread with the back cover instead.
+   Fix: insert one invisible spacer slot right before the back cover so
+   the pairing comes out even (same trick real print booklets use). The
+   spacer only exists inside the flipbook's own DOM slots — it's never
+   counted as a real page anywhere else (thumbnails, page counter, PDF). */
+function domIndexForPage(p) {
+    if (hasFiller && p === totalPages) return totalPages; // back cover shifts one slot right
+    return p - 1;
+}
+function realPageForDomIndex(d) {
+    if (!hasFiller) return d + 1;
+    if (d < totalPages - 1) return d + 1;
+    if (d === totalPages - 1) return totalPages - 1; // spacer slot: still "on" the last content page
+    return totalPages;                                 // true back-cover slot
+}
+let fitScale = 1.0, currentPageIdx = 0;
+let wasPortrait = null;
+const stage = document.getElementById('stage');
+const bookEl = document.getElementById('flipbook');
+const thumbsEl = document.getElementById('thumbs');
+const pageDone = [];
+
+/* ───────────────────── rendering ───────────────────── */
+
+async function renderPageToDataURL(n, outScale) {
+    const page = await pdfDoc.getPage(n);
+    const vp = page.getViewport({ scale: outScale });
+    const canvas = document.createElement('canvas');
+    canvas.width = vp.width; canvas.height = vp.height;
+    await page.render({ canvasContext: canvas.getContext('2d'), viewport: vp }).promise;
+    const url = canvas.toDataURL('image/jpeg', 0.82);
+    page.cleanup();
+    return { n, url };
+}
+
+function setPageImage(n, url) {
+    const img = bookEl.querySelectorAll('.page img')[n - 1];
+    if (img) img.src = url;
+    const th = thumbsEl.children[n - 1];
+    if (th) th.querySelector('img').src = url;
+    pageDone[n - 1] = true;
+}
+
+async function renderBatch(pages, scale, onEach) {
+    const CONCURRENT = 6;
+    for (let i = 0; i < pages.length; i += CONCURRENT) {
+        const chunk = pages.slice(i, i + CONCURRENT);
+        const results = await Promise.all(chunk.map(n => renderPageToDataURL(n, scale)));
+        results.forEach(r => { setPageImage(r.n, r.url); if (onEach) onEach(r.n); });
+    }
+}
+
+/* Progress bar: 0-55% tracks the PDF download itself (via pdf.js's own
+   byte-range progress callback), 55-100% tracks rendering the first
+   page(s) needed to show the book. Real numbers, not a fake timer. */
+function setProgress(pct, label) {
+    const fill = document.getElementById('loadFill');
+    const p = Math.max(0, Math.min(100, Math.round(pct)));
+    if (fill) fill.style.width = p + '%';
+    setStatus(label + '\u2026 ' + p + '%');
+}
+
+async function loadPDF() {
+    setProgress(0, 'Downloading mybookru.pdf');
+    try {
+        /* Passing {url} instead of pre-fetching an arraybuffer lets pdf.js
+           use HTTP range requests: it only pulls the byte ranges it needs
+           for page 1 first, instead of waiting on the whole file. On a
+           server that supports Range (Cloudflare's static assets do),
+           this is the single biggest speed win for large PDFs. */
+        const loadingTask = pdfjsLib.getDocument({
+            url: PDF_URL,
+            rangeChunkSize: 65536
+        });
+        loadingTask.onProgress = (p) => {
+            if (p.total) setProgress((p.loaded / p.total) * 55, 'Downloading mybookru.pdf');
+        };
+        pdfDoc = await loadingTask.promise;
+        totalPages = pdfDoc.numPages;
+
+        const p1 = await pdfDoc.getPage(1);
+        const vp1 = p1.getViewport({ scale: 1 });
+        baseH = 760;
+        baseW = Math.round(baseH * (vp1.width / vp1.height));
+        p1.cleanup();
+
+        buildShells('');
+        document.getElementById('totPages').textContent = totalPages;
+
+        const firstPages = totalPages > 1 ? [1, 2] : [1];
+        setProgress(55, 'Rendering pages');
+        let done = 0;
+        await renderBatch(firstPages, 1.5, () => {
+            done++;
+            setProgress(55 + (done / firstPages.length) * 45, 'Rendering pages');
+        });
+
+        initFlipbook();
+
+        const rest = [];
+        for (let p = 1; p <= totalPages; p++) if (!pageDone[p - 1]) rest.push(p);
+        renderBatch(rest, 1.5);
+    } catch (err) {
+        console.error(err);
+        document.getElementById('overlay').innerHTML =
+            '<div class="err"><b>Failed to load the flipbook.</b><br>' + err.message + '</div>';
+    }
+}
+
+function buildShells(srcAttr) {
+    bookEl.innerHTML = '';
+    thumbsEl.innerHTML = '';
+    hasFiller = totalPages > 2 && totalPages % 2 === 1;
+    for (let p = 1; p <= totalPages; p++) {
+        if (hasFiller && p === totalPages) {
+            const blank = document.createElement('div');
+            blank.className = 'page page-blank';
+            bookEl.appendChild(blank);
+        }
+        const d = document.createElement('div');
+        d.className = 'page';
+        d.innerHTML = '<img draggable="false"' + srcAttr + '>';
+        bookEl.appendChild(d);
+
+        const t = document.createElement('div');
+        t.className = 'thumb';
+        t.innerHTML = '<img draggable="false"' + srcAttr + '><span class="num">' + p + '</span>';
+        t.onclick = () => { if (flipBook) flipBook.flip(domIndexForPage(p)); };
+        thumbsEl.appendChild(t);
+        pageDone.push(false);
+    }
+}
+
+/* ───────────────────── flipbook ───────────────────── */
+
+function fitZoom() {
+    // guard: during fullscreen/orientation transitions the stage can
+    // briefly report 0, which used to collapse the book to invisible
+    const availW = Math.max(stage.clientWidth - 60, 200);
+    const availH = Math.max(stage.clientHeight - 40, 200);
+    const spreadW = window.innerWidth < 820 ? baseW : baseW * 2;
+    return Math.min(availW / spreadW, availH / baseH, 1.4);
+}
+
+function setBookBox(w, h, isPortrait) {
+    bookEl.style.width = (isPortrait ? w : w * 2) + 'px';
+    bookEl.style.height = h + 'px';
+}
+
+function createFlipbook() {
+    const isPortrait = window.innerWidth < 820;
+    wasPortrait = isPortrait;
+    fitScale = fitZoom();                       // book is always built at fit size
+    const w = Math.round(baseW * fitScale);
+    const h = Math.round(baseH * fitScale);
+    setBookBox(w, h, isPortrait);
+
+    flipBook = new St.PageFlip(bookEl, {
+        width: w, height: h,
+        size: 'fixed',
+        minWidth: 150, maxWidth: 2600,
+        minHeight: 150, maxHeight: 2600,
+        showCover: true,
+        mobileScrollSupport: true,
+        usePortrait: isPortrait,
+        drawShadow: true,
+        maxShadowOpacity: 0.55,
+        flippingTime: 800,
+        startPage: currentPageIdx,
+        autoSize: false,
+        swipeDistance: 30
+    });
+    flipBook.loadFromHTML(bookEl.querySelectorAll('.page'));
+
+    flipBook.on('flip', e => {
+        currentPageIdx = e.data;
+        const real = realPageForDomIndex(e.data);
+        document.getElementById('curPage').textContent = real;
+        markThumb(real - 1);
+    });
+
+    layoutBook();
+}
+
+/* Zoom: pure CSS transform on a wrapper. The flipbook DOM never changes size,
+   so StPageFlip's coordinates stay valid — pages zoom in place instead of
+   sliding, and the flip animation keeps working at every zoom level. */
+function applySize() {
+    if (!flipBook) return;
+    const isPortrait = window.innerWidth < 820;
+    if (isPortrait !== wasPortrait) {
+        recreateFlipbook();   // only rebuild when single-page <-> spread mode changes
+        return;
+    }
+    layoutBook();
+}
+
+function layoutBook() {
+    const isPortrait = window.innerWidth < 820;
+    const w = Math.round(baseW * fitScale);
+    const h = Math.round(baseH * fitScale);
+    const wrap = document.getElementById('scaleWrap');
+    // wrapper occupies the SCALED footprint -> stage scrolls to cover all of it
+    wrap.style.width  = Math.round(w * (isPortrait ? 1 : 2) * currentZoom) + 'px';
+    wrap.style.height = Math.round(h * currentZoom) + 'px';
+    bookEl.style.transform = 'scale(' + currentZoom + ')';
+    updateZoomUI();
+}
+
+/* rebuild path (orientation switch): snapshot images so nothing is lost */
+function recreateFlipbook() {
+    const srcs = [...bookEl.querySelectorAll('.page img')].map(i => i.getAttribute('src') || '');
+    let idx = currentPageIdx;
+    if (flipBook) {
+        try { idx = flipBook.getCurrentPageIndex(); flipBook.destroy(); } catch (e) {}
+        flipBook = null;
+    }
+    currentPageIdx = idx;
+    buildShellsFromSrcs(srcs);
+    try {
+        createFlipbook();
+    } catch (e) {
+        /* rebuild failed — at least the page images stay visible */
+        console.error('flipbook rebuild failed:', e);
+        bookEl.classList.add('active');
+    }
+    /* pages that hadn't finished rendering were snapshotted blank —
+       re-render them so a rebuild never leaves holes */
+    const missing = [];
+    srcs.forEach((s, i) => { if (!s) missing.push(i + 1); });
+    if (missing.length && pdfDoc) renderBatch(missing, 1.5);
+}
+
+function buildShellsFromSrcs(srcs) {
+    bookEl.innerHTML = '';
+    hasFiller = totalPages > 2 && totalPages % 2 === 1;
+    srcs.forEach((s, i) => {
+        const p = i + 1;
+        if (hasFiller && p === totalPages) {
+            const blank = document.createElement('div');
+            blank.className = 'page page-blank';
+            bookEl.appendChild(blank);
+        }
+        const d = document.createElement('div');
+        d.className = 'page';
+        d.innerHTML = '<img draggable="false"' + (s ? ' src="' + s + '"' : '') + '>';
+        bookEl.appendChild(d);
+        pageDone[i] = !!s;
+    });
+}
+
+function initFlipbook() {
+    currentZoom = 1.0;          // 100% = fit-to-screen; +/- move around that
+    createFlipbook();
+    updateZoomUI();
+    document.getElementById('overlay').style.display = 'none';
+    requestAnimationFrame(() => bookEl.classList.add('active'));
+}
+
+function markThumb(idx) {
+    [...thumbsEl.children].forEach((t, i) => t.classList.toggle('active', i === idx));
+    const el = thumbsEl.children[idx];
+    if (el) el.scrollIntoView({ behavior: 'smooth', inline: 'center', block: 'nearest' });
+}
+
+function updateZoomUI() {
+    document.getElementById('zoomLabel').textContent = Math.round(currentZoom * fitScale * 100) + '%';
+}
+
+/* ───────────────────── controls ───────────────────── */
+
+function flipPrev() { if (flipBook) flipBook.flipPrev(); }
+function flipNext() { if (flipBook) flipBook.flipNext(); }
+
+function changeZoom(d) {
+    currentZoom = Math.max(0.3, Math.min(3.0, currentZoom + d));
+    applySize();            // ← live resize, no rebuild
+}
+
+document.getElementById('prevBtn').onclick = flipPrev;
+document.getElementById('nextBtn').onclick = flipNext;
+document.getElementById('prevBtnT').onclick = flipPrev;
+document.getElementById('nextBtnT').onclick = flipNext;
+document.getElementById('zoomIn').onclick = () => changeZoom(0.15);
+document.getElementById('zoomOut').onclick = () => changeZoom(-0.15);
+document.getElementById('dlBtn').onclick = downloadPDF;
+
+document.addEventListener('keydown', e => {
+    if (!flipBook) return;
+    if (e.key === 'ArrowLeft') flipPrev();
+    if (e.key === 'ArrowRight') flipNext();
+    if (e.key === '+' || e.key === '=') changeZoom(0.15);
+    if (e.key === '-') changeZoom(-0.15);
+});
+
+let resizeT;
+window.addEventListener('resize', () => {
+    clearTimeout(resizeT);
+    resizeT = setTimeout(() => {
+        if (!flipBook) return;
+        recreateFlipbook();   // refit to the new window; zoom level is preserved
+    }, 200);
+});
+
+/* ───────────────────── pinch to zoom (mobile) ───────────────────── */
+
+let pinchStartDist = null;
+
+function touchDistance(t) {
+    return Math.hypot(t[0].clientX - t[1].clientX, t[0].clientY - t[1].clientY);
+}
+
+stage.addEventListener('touchstart', e => {
+    if (e.touches.length === 2 && flipBook) {
+        pinchStartDist = touchDistance(e.touches);
+        flipBook.disable();          // stop page-flip swipes while pinching
+    }
+}, { passive: true });
+
+stage.addEventListener('touchmove', e => {
+    if (e.touches.length === 2 && pinchStartDist) {
+        e.preventDefault();          // block page scroll/zoom, we handle it
+        const d = touchDistance(e.touches);
+        currentZoom = Math.max(0.3, Math.min(3.0, currentZoom * (d / pinchStartDist)));
+        pinchStartDist = d;
+        applySize();                 // live resize, no rebuild → no freeze
+    }
+}, { passive: false });
+
+stage.addEventListener('touchend', e => {
+    if (pinchStartDist && e.touches.length < 2) {
+        pinchStartDist = null;
+        if (flipBook) flipBook.enable();
+    }
+});
+
+function downloadPDF() {
+    const a = document.createElement('a');
+    a.href = PDF_URL;
+    a.download = 'mybookru.pdf';
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+}
+
+function setStatus(t) { document.getElementById('statusText').textContent = t; }
+
+loadPDF();
+</script>
+
+</body>
+</html>
